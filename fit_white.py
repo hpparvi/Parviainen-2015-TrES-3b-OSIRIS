@@ -8,8 +8,10 @@ from pytransit import MandelAgol
 from exotk.priors import UP,NP, PriorSet
 from exotk.lpf import SingleTransitMultiColorLPF as LPF
 from exotk.utils.limb_darkening import quadratic_law
-from hpgp.gp import GP
 from core import *
+
+from george import GP
+from george.kernels import ExpSquaredKernel, ExpKernel
 
 import matplotlib.pyplot as pl
 
@@ -20,7 +22,7 @@ class GLPF_WN(object):
         priors = {'transit_center':  UP(  0.605, 0.615,  'tc'),             
           'period':          NP(  1.306, 1e-7,   'p'),             
           'stellar_density': NP(  1.646, 0.05, 'rho', lims=[1,3]), 
-          'radius_ratio':    UP(  0.150, 0.25,   'k'),
+          'radius_ratio':    UP(  0.150, 0.28,   'k'),
           'baseline':        UP(  0.980, 1.02,  'bl'),
           'ldc_0_0':         UP(     -5,    5,  'ldc_0_0'),
           'ldc_0_1':         UP(     -5,    5,  'ldc_0_1')}
@@ -33,7 +35,7 @@ class GLPF_WN(object):
             print "Unknown flux mode, choose either 'relative' or 'raw'"
             exit()
 
-        self.tm = MandelAgol(nthr=nthr, lerp=True, klims=(0.15,0.25), nk=256)
+        self.tm = MandelAgol(nthr=nthr, lerp=True, klims=(0.15,0.28), nk=512)
         self.lpf = LPF(df.time, flux, df.airmass, 
                        tcenter=0.61, tduration=0.06, priors=priors, 
                        tmodel=self.tm)
@@ -45,6 +47,8 @@ class GLPF_WN(object):
 
         self.ps = self.lpf.ps
 
+        ## Load the stellar brightness profiles
+        ##
         lddata = np.load('data/tres_3_limb_darkening_w.npz')
         self.im = lddata['im'][:-1]
         self.ie = lddata['ie'][:-1]
@@ -52,10 +56,12 @@ class GLPF_WN(object):
         self.mu = lddata['mu'][:-1]
         self.ld0 = fmin(lambda pv: ((self.im - quadratic_law(self.mu, pv))**2).sum(), [0.5, 0.2], disp=False)
 
+
     def ld_log_likelihood(self,pv):
         chi_sqr = ((self.im - quadratic_law(self.mu, pv[self.lpf.ldc_slice]))**2/self.iv).sum()
         log_l   = -0.5*self.mu.size*np.log(2*pi) -np.log(self.ie).sum() - 0.5*chi_sqr
         return log_l
+
         
     def log_posterior(self,pv):
         return self.lpf.log_posterior(pv) + self.ld_log_likelihood(pv)
@@ -65,19 +71,19 @@ class GLPF_WN(object):
 class GLPF_GP(GLPF_WN):
     def __init__(self, nthr=2, flux_mode='relative'):
         super(GLPF_GP, self).__init__(nthr, flux_mode)
-        self.gp = GP(self.lpf.time.ravel(), self.lpf.flux.ravel(), 'e')
-        
-    def set_gp(self, sigma, l):
-        print sigma, l
-        self.gp(sigma, l)
+        self.gp = GP(ExpKernel(1))
+        self.lpf.priors.append(UP(1e-5,1e-3,'gp_std'))
+        self.lpf.priors.append(UP(-5, 6,'gp_log_inv_length'))
+        self.lpf.ps = PriorSet(self.lpf.priors)
+        self.ps = self.lpf.ps
 
+        
     def log_posterior(self,pv):
         if np.any(pv < self.ps.pmins) or np.any(pv>self.ps.pmaxs): return -1e18
+        self.gp.kernel = pv[10]**2*ExpKernel(1./10**pv[11])
+        self.gp.compute(self.lpf.time.ravel(), pv[5])
 
-        self.gp.y[:] = 1e4*(self.lpf.normalize_flux(pv) - self.lpf.compute_lc_model(pv)).ravel()
-        self.gp(1e4*pv[5], 0.01)
-
-        log_l = self.gp.log_likelihood()
+        log_l = self.gp.lnlikelihood((self.lpf.normalize_flux(pv) - self.lpf.compute_lc_model(pv)).ravel())
         log_p = self.ps.c_log_prior(pv)
         return log_p + log_l + self.ld_log_likelihood(pv)
 
@@ -126,24 +132,7 @@ if __name__ == '__main__':
 
     if do_mc:
         sampler = EnsembleSampler(args.n_walkers, lpf.ps.ndim, lpf.log_posterior)        
-
-        #if args.noise_model == 'gp':
-            #ch_wn = np.load(mc_wn_file)['chains']
-            #fc_wn = ch_wn.reshape([-1,lpf.ps.ndim])
-            #scatter_means = fc_wn[::50,lpf.lpf.err_slice].mean(0)
-            #scatter_stds  = fc_wn[::50,lpf.lpf.err_slice].std(0)
-
-            #for i,(sm,ss) in enumerate(zip(scatter_means, scatter_stds)):
-            #    name = lpf.ps.priors[lpf.lpf.err_start+i].name
-            #    lpf.ps.priors[lpf.lpf.err_start+i] = NP(sm, ss, name, lims=(0,1))
-
-            #mpv    = np.median(fc_wn, axis=0)
-            #resids = 1e4*(lpf.lpf.normalize_flux(mpv) - lpf.lpf.compute_lc_model(mpv))
-            #gp = GP(lpf.lpf.time, resids, 'e')
-            #pve = fmin(lambda pv: -gp(*pv), [resids.std(), 1], disp=False)
-            #lpf.set_gp(*pve)
-            #lpf.set_gp(2.5, 0.01)
-
+  
         if continue_mc:
             population = np.load(mc_file)['chains'][:,-1,:]
             print "Continuing MCMC from the previous run"
@@ -152,7 +141,10 @@ if __name__ == '__main__':
                 population = np.load(de_file)['population']
                 print "Starting MCMC from the DE population"
             else:
-                population = ch_wn[:,-1,:]
+                population = np.load(mc_wn_file)['chains'][:,-1,:]
+                population = np.concatenate([population,np.ones([population.shape[0],2])], axis=1)
+                population[:,10] = np.random.permutation(population[:,5])
+                population[:,11] = np.random.normal(4.5, 0.01, size=population.shape[0])
 
         for irun in range(args.mc_n_runs):
             sys.stdout.write('')
