@@ -73,28 +73,28 @@ class GLPF_WN(object):
 
 
 class GLPF_GP(GLPF_WN):
-    def __init__(self, nthr=2, flux_mode='relative'):
+    def __init__(self, gp_hp_file, nthr=2, flux_mode='relative'):
         super(GLPF_GP, self).__init__(nthr, flux_mode)
-        self.lpf.priors.append(UP(1e-5,1e-2,'gp_std'))
-        self.lpf.priors.append(UP(-5, 6,'gp_log_inv_length'))
+        self.hps = np.load(gp_hp_file)['hps']
+
+        for ipb in range(self.npb):
+            self.lpf.priors[self.lpf.err_start+ipb] = NP(self.hps[2+ipb], 1e-5, 'el_{}'.format(ipb), lims=[0,1])
         self.lpf.ps = PriorSet(self.lpf.priors)
         self.ps = self.lpf.ps
-        self.lpf.gp_start = self.lpf.bsl_slices[-1].stop
-        self.gp = GP(ExpKernel(1.))
+
+        self.gps = []
+        for i in range(self.npb):
+            self.gps.append(GP(self.hps[0]**2*ExpKernel(self.hps[1])))
+            self.gps[-1].compute(self.lpf.time.ravel(), self.hps[2+ipb])
+
 
     def log_posterior(self,pv):
         if np.any(pv < self.ps.pmins) or np.any(pv>self.ps.pmaxs): return -1e18
         residuals = self.lpf.normalize_flux(pv) - self.lpf.compute_lc_model(pv)
 
         log_l = 0.
-        mer = pv[self.lpf.err_slice].mean()
-        gps = self.lpf.gp_start
-
-        self.gp.kernel = pv[gps]**2*ExpKernel(1./10**pv[gps+1])
-        self.gp.compute(self.lpf.time.ravel(), mer)
-
         for ipb in range(self.npb):
-            log_l += self.gp.lnlikelihood(residuals[:,ipb])
+            log_l += self.gps[ipb].lnlikelihood(residuals[:,ipb])
 
         log_p = self.ps.c_log_prior(pv)
         return log_p + log_l + self.ld_log_likelihood(pv)
@@ -112,6 +112,7 @@ if __name__ == '__main__':
     ap.add_argument('--do-mc', action='store_true', default=False)
     ap.add_argument('--dont-continue-mc', dest='continue_mc', action='store_false', default=True)
     ap.add_argument('--noise-model', default='wn', choices=['wn','gp'])
+    ap.add_argument('--gp-hp-file', default='')
 
     args = ap.parse_args()
 
@@ -128,7 +129,7 @@ if __name__ == '__main__':
     if args.noise_model == 'wn':
         lpf = GLPF_WN(args.n_threads)
     else:
-        lpf = GLPF_GP(args.n_threads)
+        lpf = GLPF_GP(args.gp_hp_file, args.n_threads)
 
     if do_de:
         de = DiffEvol(lpf.log_posterior, lpf.ps.bounds, args.n_walkers, maximize=True)
@@ -164,9 +165,6 @@ if __name__ == '__main__':
             else:
                 print "Starting new GP MCMC from the white noise population"
                 population = np.load(mc_wn_file)['chains'][:,-1,:]
-                population = np.concatenate([population,np.ones([population.shape[0],2])], axis=1)
-                population[:,lpf.lpf.gp_start] = np.random.permutation(population[:,lpf.lpf.err_start])
-                population[:,lpf.lpf.gp_start+1] = np.random.normal(4.5, 0.01, size=population.shape[0])
 
         for irun in range(args.mc_n_runs):
             sys.stdout.write('')
