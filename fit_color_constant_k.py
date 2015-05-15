@@ -41,34 +41,19 @@ class GLPF_WN(object):
                        tcenter=0.61, tduration=0.06, priors=priors, 
                        tmodel=self.tm)
 
+        for ik in range(self.npb):
+            self.lpf.priors[self.lpf.k2_start+ik] = NP(0.175**2, 0.001**2,  'k2_{}'.format(ik), lims=(0,1))
+
+        self.lpf.ps = PriorSet(self.lpf.priors)
         self.ps = self.lpf.ps
-
-        ## Load the stellar brightness profiles
-        ##
-        lddata = np.load('data/tres_3_limb_darkening_c.npz')
-        self.im = lddata['im'][:-1,:].T
-        self.ie = lddata['ie'][:-1,:].T
-        self.iv = self.ie**2
-        self.mu = lddata['mu'][:-1]
-
-        mo = self.lpf.mask_oot
-        self.ld0 = [fmin(lambda pv: ((im - quadratic_law(self.mu, pv))**2).sum(), [0.5, 0.2], disp=False) for im in self.im]
-        self.pbl = [fmin(lambda pv: sum((self.lpf.flux[mo,i]/self.flux_baseline(self.lpf.airmass[mo], pv)-1)**2), [1,0], disp=False) for i in range(self.npb)]
 
 
     def flux_baseline(self, airmass, pv):
         return pv[0]/np.exp(pv[1]*airmass)
         
 
-    def ld_log_likelihood(self,pv):
-        i_model = quadratic_law(self.mu, pv[self.lpf.ldc_slice].reshape((self.npb,2)))
-        chi_sqr = ((self.im - i_model)**2/self.iv).sum()
-        log_l   = -0.5*self.im.size*np.log(2*pi) -np.log(self.ie).sum() - 0.5*chi_sqr
-        return log_l
-        
-
     def log_posterior(self,pv):
-        return self.lpf.log_posterior(pv) + self.ld_log_likelihood(pv)
+        return self.lpf.log_posterior(pv)
 
 
 
@@ -132,11 +117,11 @@ if __name__ == '__main__':
 
     args = ap.parse_args()
 
-    mc_wn_file = join(dir_results,'TrES_3b_color_wn_mc.npz')
+    mc_wn_file = join(dir_results,'TrES_3b_color_wn_ib_constant_k_mc.npz')
     mc_gp_file = join(dir_results,'TrES_3b_color_gp_mc.npz')
 
     de_file = join(dir_results,'TrES_3b_color_de.npz')
-    mc_file = join(dir_results,'TrES_3b_color_{:s}_mc.npz').format(args.noise_model)
+    mc_file = join(dir_results,'TrES_3b_color_{:s}_ib_constant_k_mc.npz').format(args.noise_model)
 
     do_de = args.do_de or not exists(de_file)
     do_mc = args.do_mc or not exists(mc_file)

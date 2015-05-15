@@ -1,0 +1,5 @@
+old
+.ipynb_checkpoints
+.directory
+*.pyc
+*~
