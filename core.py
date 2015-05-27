@@ -11,17 +11,58 @@ except ImportError:
 
 from os.path import join, exists
 from matplotlib.dates import datestr2num
-from numpy import pi, array
-
-from plots import AAOCW, AAPGW
-
 from matplotlib import rc
+from numpy import pi, array, exp, abs, sum
+from numpy.polynomial.chebyshev import Chebyshev
+
+from exotk.constants import rjup, rsun
+
+AAOCW, AAPGW = 3.4645669, 7.0866142
+
+class WavelengthSolution(object):
+    def __init__(self):
+        self.fitted_lines = None
+        self.reference_lines = None
+        self._cp2w = None
+        self._cw2p = None
+
+    def fit(self, fitted_lines, reference_lines):
+        self.fitted_lines = fitted_lines
+        self.reference_lines = reference_lines
+        self._cp2w = Chebyshev.fit(self.fitted_lines, self.reference_lines, 5, domain=[0,2051])
+        self._cw2p = Chebyshev.fit(self.reference_lines, self.fitted_lines, 5, domain=[400,1000])
+        
+    def pixel_to_wl(self, pixels):
+        return self._cp2w(pixels)
+    
+    def wl_to_pixel(self, wavelengths):
+        return self._cw2p(wavelengths)
+
+class GeneralGaussian(object):
+    def __init__(self, name, c, s, p):
+        self.name = name
+        self.c = c
+        self.s = s
+        self.p = p
+        
+    def __call__(self, x):
+        return np.exp(-0.5*np.abs((x-self.c)/self.s)**(2*self.p))
+    
+class WhiteFilter(object):
+    def __init__(self, name, filters):
+        self.name = name
+        self.filters = filters
+        
+    def __call__(self, x):
+        return np.sum([f(x) for f in self.filters], 0)
+
+
 rc('font', size=6)
 rc('axes', labelsize=8)
 rc('ytick', labelsize=8)
 rc('xtick', labelsize=8)
 
-from exotk.constants import rjup, rsun
+
 rstar = 0.829*rsun
 
 dir_data    = 'data'
@@ -33,6 +74,10 @@ fn_spect_lc = '20140707-tres_0003_b-gtc_osiris-nblcs-250.dat'
 
 c_ob = "#002147" # Oxford blue
 c_bo = "#CC5500" # Burnt orange
+
+pb_centers    = 540. + np.arange(16)*25
+pb_filters_nb = [GeneralGaussian('', c, 12, 20) for c in pb_centers]
+pb_filter_bb  = WhiteFilter('white', pb_filters_nb)
 
 pb_ld = array(
     [[5300,5425,5550], [5550,5675,5800], [5800,5925,6050], [6050,6175,6300], [6300,6425,6550], [6550,6675,6800], [6800,6925,7050], 
