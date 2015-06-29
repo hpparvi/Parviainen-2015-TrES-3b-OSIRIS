@@ -2,20 +2,17 @@ import sys
 import math as m
 import numpy as np
 import pandas as pd
+import seaborn as sb
+import pyfits as pf
 
-try:
-    import seaborn as sb
-    sb.set_style('white')
-except ImportError:
-    pass
-
-from os.path import join, exists
+from os.path import join, exists, basename
 from matplotlib.dates import datestr2num
 from matplotlib import rc
 from numpy import pi, array, exp, abs, sum
 from numpy.polynomial.chebyshev import Chebyshev
+from scipy.constants import k, G, proton_mass
 
-from exotk.constants import rjup, rsun
+from exotk.constants import rjup, mjup, rsun, msun
 
 AAOCW, AAPGW = 3.4645669, 7.0866142
 
@@ -57,13 +54,22 @@ class WhiteFilter(object):
         return np.sum([f(x) for f in self.filters], 0)
 
 
-rc('font', size=6)
-rc('axes', labelsize=8)
-rc('ytick', labelsize=8)
-rc('xtick', labelsize=8)
+def H(T,g,mu=None):
+    """Atmospheric scale height [m]"""
+    mu = mu or 2.3*proton_mass
+    return T*k/(g*mu)
 
-
-rstar = 0.829*rsun
+## Stellar parameters
+## ------------------
+## From Torres et al. 2008
+## 
+## Note: the stellar density estimate
+MSTAR = 0.915*msun # [m]
+RSTAR = 0.812*rsun # [m]
+TSTAR = 5650       # [K]
+TEQ   = 1620       # [K]
+LOGGS = 4.4       
+LOGGP = 3.452  
 
 dir_data    = 'data'
 dir_plots   = 'plots'
@@ -72,9 +78,36 @@ dir_results = 'results'
 fn_white_lc = '20140707-tres_0003_b-gtc_osiris-wlc-ori.dat'
 fn_spect_lc = '20140707-tres_0003_b-gtc_osiris-nblcs-250.dat'
 
+## Matplotlib configuration
+rc('figure', figsize=(13,5))
+rc(['axes', 'ytick', 'xtick'], labelsize=8)
+rc('font', size=6)
+
+rc_paper = {"lines.linewidth": 1,
+            'ytick.labelsize': 6.5,
+            'xtick.labelsize': 6.5,
+            'axes.labelsize': 6.5,
+            'figure.figsize':(AAOCW,0.65*AAOCW)}
+
+rc_notebook = {'figure.figsize':(13,5)}
+
+sb.set_context('notebook', rc=rc_notebook)
+sb.set_style('white')
+
+## Color definitions
+##
 c_ob = "#002147" # Oxford blue
 c_bo = "#CC5500" # Burnt orange
+cp = sb.color_palette([c_ob,c_bo], n_colors=2)+sb.color_palette(name='deep',n_colors=4)
+sb.set_palette(cp)
 
+## Potassium and Kalium resonance line centers [nm]
+##
+wlc_k  = array([766.5,769.9])
+wlc_na = array([589.4])
+
+## Narrow-band filters
+##
 pb_centers    = 540. + np.arange(16)*25
 pb_filters_nb = [GeneralGaussian('', c, 12, 20) for c in pb_centers]
 pb_filter_bb  = WhiteFilter('white', pb_filters_nb)

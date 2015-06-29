@@ -70,18 +70,12 @@ if __name__ == '__main__':
     ap.add_argument('--do-de', action='store_true', default=False)
     ap.add_argument('--do-mc', action='store_true', default=False)
     ap.add_argument('--dont-continue-mc', dest='continue_mc', action='store_false', default=True)
-    ap.add_argument('--noise-model', default='wn', choices=['wn','gp'])
-    ap.add_argument('--gp-hp-file', default='')
     ap.add_argument('--lc-name', default='final/nb_nomask')
     ap.add_argument('--run-name', default='nomask')
 
     args = ap.parse_args()
-
-    mc_wn_file = join(dir_results,'TrES_3b_color_wn_{:s}_mc.npz'.format(args.run_name))
-    mc_gp_file = join(dir_results,'TrES_3b_color_gp_{:s}_mc.npz'.format(args.run_name))
-
-    de_file = join(dir_results,'TrES_3b_color_{:s}_de.npz'.format(args.run_name))
-    mc_file = join(dir_results,'TrES_3b_color_{:s}_{:s}_mc.npz').format(args.noise_model, args.run_name)
+    de_file = join(dir_results,'TrES_3b_color_{:s}_wn_de.npz'.format(args.run_name))
+    mc_file = join(dir_results,'TrES_3b_color_{:s}_wn_mc.npz'.format(args.run_name))
 
     do_de = args.do_de or not exists(de_file)
     do_mc = args.do_mc or not exists(mc_file)

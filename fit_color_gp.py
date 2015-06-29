@@ -9,36 +9,30 @@ from argparse import ArgumentParser
 from emcee import EnsembleSampler
 from pyde.de import DiffEvol
 from lpf_ww import LPFunction as LPFS
-from lpf_nd import LPFunction as LPFM
+from lpf_gp import LPFunction as LPFM
 from core import *
      
 class PE(object):
     def __init__(self, wfname, n_walkers=100, n_threads=4, ipb=None):
         df_aux = pd.read_hdf('results/light_curves.h5', 'aux')
-        df_lcb  = pd.read_hdf('results/light_curves.h5', 'final/bb_{:s}'.format(wfname))
-        df_lcn  = pd.read_hdf('results/light_curves.h5', 'final/nb_{:s}'.format(wfname))
+        df_lc  = pd.read_hdf('results/light_curves.h5', 'final/nb_{:s}'.format(wfname))
+        df_gph = pd.read_hdf('results/light_curves.h5', 'gp_hyperparameters/{}'.format(wfname))
         msk = array(df_aux.bad_mask, dtype=np.bool)
         
-        flux = concatenate([array(df_lcb),array(df_lcn)], axis=1)[msk,:]
-        flt = [pb_filter_bb]+pb_filters_nb
-
         if ipb is None:
-            self.lpf = LPFM(array(df_aux.mjd-56846+0.5)[msk], flux, 
-                                  df_aux.airmass[msk], n_threads)
+            self.lpf = LPFM(array(df_aux.mjd-56846+0.5)[msk], array(df_lc)[msk,:], 
+                                  df_aux.airmass[msk], df_gph, n_threads)
         else:
-            self.lpf = LPFS(array(df_aux.mjd-56846+0.5)[msk], flux[:,ipb], 
-                                  df_aux.airmass[msk], n_threads, filters=[flt[ipb]])
-
+            self.lpf = LPFS(array(df_aux.mjd-56846+0.5)[msk], array(df_lc)[msk,ipb], 
+                                  df_aux.airmass[msk], n_threads, filters=[pb_filters_nb[ipb]])
             
         self.de = DiffEvol(self.lpf, self.lpf.ps.bounds, n_walkers, maximize=True, C=0.85, F=0.25)
         self.sampler = EnsembleSampler(self.de.n_pop, self.lpf.ps.ndim, self.lpf) 
                 
-        iu,iv,ll = (7,8,5) if ipb is None else (8,9,6)
         qc = self.lpf.lds.coeffs_qd()[0]
         for ipb in range(self.lpf.npb):
-            self.de._population[:,iu+ll*ipb] = normal(qc[ipb,0], 0.05, size=n_walkers) 
-            self.de._population[:,iv+ll*ipb] = normal(qc[ipb,1], 0.05, size=n_walkers)
-
+            self.de._population[:,8+6*ipb] = normal(qc[ipb,0], 0.05, size=n_walkers) 
+            self.de._population[:,9+6*ipb] = normal(qc[ipb,1], 0.05, size=n_walkers)
             
     def run_de(self, n_iter=250):
         for ide, (der,dev) in enumerate(self.de(n_iter)):
@@ -77,22 +71,21 @@ if __name__ == '__main__':
     ap.add_argument('--do-de', action='store_true', default=False)
     ap.add_argument('--do-mc', action='store_true', default=False)
     ap.add_argument('--dont-continue-mc', dest='continue_mc', action='store_false', default=True)
-    ap.add_argument('--gp-hp-file', default='')
-    ap.add_argument('--lc-name', default='nomask')
+    ap.add_argument('--lc-type', default='nomask')
     ap.add_argument('--run-name', default='nomask')
 
     args = ap.parse_args()
-    de_file = join(dir_results,'TrES_3b_color_{:s}_dw_de.npz'.format(args.run_name))
-    mc_file = join(dir_results,'TrES_3b_color_{:s}_dw_mc.npz'.format(args.run_name))
+    de_file = join(dir_results,'TrES_3b_color_{:s}_gp_de.npz'.format(args.run_name))
+    mc_file = join(dir_results,'TrES_3b_color_{:s}_gp_mc.npz'.format(args.run_name))
 
     do_de = args.do_de or not exists(de_file)
     do_mc = args.do_mc or not exists(mc_file)
     continue_mc = args.continue_mc and exists(mc_file)
 
-    pe = PE(args.lc_name, args.n_walkers, n_threads=args.n_threads)
+    pe = PE(args.lc_type, args.n_walkers, n_threads=args.n_threads)
 
     if do_de:
-        pes = [PE(args.lc_name, n_walkers=args.n_walkers, n_threads=args.n_threads, ipb=ipb) for ipb in range(17)]
+        pes = [PE(args.lc_type, n_walkers=args.n_walkers, n_threads=args.n_threads, ipb=ipb) for ipb in range(16)]
         [p.run_de(100) for p in pes]
 
         pe.de._population[:,:4] = pes[0].de.population[:,:4]
