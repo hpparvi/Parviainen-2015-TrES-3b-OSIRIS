@@ -3,3 +3,8 @@ old
 .directory
 *.pyc
 *~
+*.npz
+*.pdf
+*.dat
+*.7z
+*.png
